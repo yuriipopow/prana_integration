@@ -1,0 +1,24 @@
+{
+  "domain": "prana",
+  "name": "Prana",
+  "codeowners": [
+    "@yuriipopow"
+  ],
+  "version": "0.1.0",
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/prana",
+  "homekit": {},
+  "iot_class": "local_polling",
+  "quality_scale": "bronze",
+  "requirements": [],
+
+  "ssdp": [],
+  "integration_type": "device",
+  "zeroconf": [
+  {
+    "type": "_prana._tcp.local."
+  }
+]
+
+}
