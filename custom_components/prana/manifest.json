@@ -4,7 +4,7 @@
   "codeowners": [
     "@yuriipopow"
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://www.home-assistant.io/integrations/prana",
