@@ -12,13 +12,16 @@
   "iot_class": "local_polling",
   "quality_scale": "bronze",
   "requirements": [],
-
   "ssdp": [],
   "integration_type": "device",
   "zeroconf": [
   {
     "type": "_prana._tcp.local."
   }
-]
+  
+],
+"branding": {
+  "icon": "icon.png"
+}
 
 }

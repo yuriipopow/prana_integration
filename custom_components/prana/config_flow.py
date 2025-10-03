@@ -1,14 +1,9 @@
-from pathlib import Path
-import aiohttp
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.components import zeroconf
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
-import asyncio
-from typing import Any
 import logging
-
+from .tools import Tools
 from .const import CONF_CONFIG, CONF_MDNS
 
 DOMAIN = "prana"
@@ -16,123 +11,88 @@ SERVICE_TYPE = "_prana._tcp.local."
 
 _LOGGER = logging.getLogger(__name__)
 
-@config_entries.HANDLERS.register(DOMAIN)
-class PranaConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
+
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for Prana integration via mDNS discovery."""
     VERSION = 1
 
-    def __init__(self):
-        self.discovered_hosts = {}
-        self.discovered_hosts_config = {}
-        self.discovered_mdns = {}
+    def __init__(self) -> None:
+        # Store a single discovered device for this flow (one flow per device)
+        self._host: str | None = None
+        self._name: str | None = None
+        self._config: dict | str | None = None
+        self._mdns: str | None = None
 
-    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> data_entry_flow.FlowResult:
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> data_entry_flow.FlowResult:
         """Handle mDNS discovery."""
-        _LOGGER.debug(f"Discovered device via Zeroconf: {discovery_info}")
-
-        
-        configured_mdns = {
-            entry.data.get(CONF_MDNS)
-            for entry in self.hass.config_entries.async_entries(DOMAIN)
-        }
-
-        
-
-        _LOGGER.debug(f"Configured mDNS names: {configured_mdns}")
-
-        
-        name = discovery_info.name
-        host = discovery_info.host
-
-
+        _LOGGER.debug("Discovered device via Zeroconf: %s", discovery_info)
 
         if discovery_info.type != SERVICE_TYPE:
             return self.async_abort(reason="not_prana_device")
 
-        elif name in configured_mdns:
-            for entry in self.hass.config_entries.async_entries(DOMAIN):
-                if name == entry.data.get(CONF_MDNS) and discovery_info.host != entry.data.get(CONF_HOST):
-                    self.hass.config_entries.async_update_entry(
-                        entry,
-                        data={**entry.data, CONF_HOST: discovery_info.host}
-                    )
-                    _LOGGER.debug(f"Updated host for {name} to {discovery_info.host}")
-            if name in configured_mdns:
-                return self.async_abort(reason="already_configured")
-        
-        
-        
+        name = discovery_info.name
+        host = discovery_info.host
 
+        # Set a stable unique ID so the discovery card can offer "Ignore"
+        await self.async_set_unique_id(name)
+        # If already configured, update host and abort
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
 
-        name = discovery_info.properties.get("label") or host
-        config = discovery_info.properties.get("config", {})
-    
+        # Extract friendly name from the config blob
+        raw_config = discovery_info.properties.get("config", "")
+        friendly_name = self._get_name_from_config(raw_config) or name or "Prana"
 
-        self.discovered_hosts[host] = name
-        self.discovered_hosts_config[host] = config
-        self.discovered_mdns[host] = discovery_info.name
-        return await self.async_step_select_device()
+        # Set placeholders so the discovery card subtitle shows device name
+        self.context["title_placeholders"] = {"name": friendly_name}
 
-    async def async_step_user(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
-        """Step for manual integration start."""
-        return await self.async_step_select_device(user_input)
+        # Keep details for confirm step
+        self._host = host
+        self._name = friendly_name
+        self._config = raw_config
+        self._mdns = name
 
-    async def async_step_select_device(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
-        """Let user select one of discovered devices."""
-        if not self.discovered_hosts:
+        return await self.async_step_confirm()
+
+    async def async_step_user(
+        self, user_input: dict | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Manual start is not supported for discovery-only flow."""
+        return self.async_abort(reason="no_devices_found")
+
+    async def async_step_confirm(
+        self, user_input: dict | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Confirmation step with a single Submit button."""
+        # Safety: ensure we have discovery data
+        if not all([self._host, self._name, self._mdns]):
             return self.async_abort(reason="no_devices_found")
 
         if user_input is not None:
-            selected_label = user_input[CONF_NAME]
-            selected_host = None
-            for host, label in self.discovered_hosts.items():
-                if label == selected_label:
-                    selected_host = host
-                    break
-            if selected_host is None:
-                return self.async_abort(reason="device_not_found")
-            await self.async_set_unique_id(self.discovered_mdns[selected_host])
-            self._abort_if_unique_id_configured()
-            
             return self.async_create_entry(
-                title=selected_label,
-                data={CONF_NAME: selected_label, CONF_HOST: selected_host, CONF_CONFIG: self.discovered_hosts_config[selected_host], CONF_MDNS: self.discovered_mdns[selected_host]},
+                title=self._name,
+                data={
+                    CONF_NAME: self._name,
+                    CONF_HOST: self._host,
+                    CONF_CONFIG: self._config,
+                    CONF_MDNS: self._mdns,
+                },
                 options={},
                 description_placeholders={},
-
             )
 
-        return self.async_show_form(
-            step_id="select_device",
-            data_schema=self._get_device_schema(),
-            description_placeholders={},
-        )
-
-    def _get_device_schema(self):
-        """Return schema for device selection as 'Name (IP)' choices."""
-        import voluptuous as vol
-        # Only show labels to user
-        return vol.Schema({
-            vol.Required(CONF_NAME): vol.In(list(self.discovered_hosts.values())),
-        })
-    
-    async def async_get_suggestions(hass, config_entry):
-    # Завантажуємо твій YAML
-        from homeassistant.util.yaml import load_yaml
-        yaml_path = Path(__file__).parent / "dashboard" / "prana_dashboard.yaml"
-        dashboard_yaml = load_yaml(yaml_path)
-
-        return [
-            {
-                "title": "Ventilation Panel",
-                "cards": dashboard_yaml
-            }
-        ]
-
-    
+        # Empty form -> shows only a Submit button
+        return self.async_show_form(step_id="confirm")
 
 
 
-
-
- 
+    def _get_name_from_config(self, config: str) -> str:
+        bytes_ = Tools.hex_string_to_int_list(config)
+        _LOGGER.debug("Byte array from config: %s", bytes_)
+        data = bytearray(bytes_[8:32])
+        _LOGGER.debug("Name bytes from config: %s", data)
+        name = data.decode("ascii").rstrip("\x00")
+        if name.startswith("PRN"):
+            name = name[7:]
+        return name

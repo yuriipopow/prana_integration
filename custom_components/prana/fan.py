@@ -10,6 +10,8 @@ from .coordinator import PranaCoordinator
 from aiohttp import ClientSession
 from homeassistant.helpers.device_registry import DeviceInfo
 from .switch import PranaSendSwitch
+from homeassistant.helpers.device_registry import DeviceInfo
+
 
 
 """Fan platform for Prana integration."""
@@ -33,9 +35,14 @@ class PranaSendSpeed:
         self.coordinator = coordinator
 
     async def send_speed_percentage(self, percentage: int):
+        _LOGGER.debug(f"Setting speed percentage to {percentage} for fan type {self.fan_type} {self.coordinator.max_speed}")
+        fan_type = PranaFanType.BOUNDED if self.coordinator.data.get("bound") else self.fan_type
+
+        speed =  percentage // (100 // self.coordinator.max_speed)
+        _LOGGER.debug(f"Calculated speed: {speed} for percentage: {percentage}")
         request_data = {
-            "speed": percentage,
-            "fanType": self.fan_type
+            "speed": speed * 10,
+            "fanType": fan_type
         }
 
         async with ClientSession() as session:
@@ -45,12 +52,16 @@ class PranaSendSpeed:
                 else:
                     raise Exception(f"Error {resp.status}")
     async def send_speed_is_on(self, value):
+        fan_type = PranaFanType.BOUNDED if self.coordinator.data.get("bound") else self.fan_type
+
         request_data = {
             "value": value,
-            "fanType": self.fan_type
+            "fanType": fan_type
         }
+
         async with ClientSession() as session:
             async with session.post(f"http://{self.coordinator.entry.data.get('host')}:12345/setSpeedIsOn", json=request_data) as resp:
+                _LOGGER.debug(f"Sent speed is on {value} for fan type {fan_type}")
                 if resp.status == 200:
                     pass
                 else:
@@ -64,7 +75,6 @@ class PranaFan(FanEntity):
     _attr_translation_key = "fan"
     _attr_unique_id: str
 
-    from homeassistant.helpers.device_registry import DeviceInfo
 
     def __init__(self, unique_id: str, name: str, coordinator: PranaCoordinator, fan_type: PranaFanType, entry: ConfigEntry) -> None:
         self._attr_unique_id = unique_id
@@ -125,9 +135,13 @@ class PranaFan(FanEntity):
         """Return the current speed as percentage."""
         _LOGGER.debug(f"Getting percentage for {self.name} ({self.fan_type})")
         if self.coordinator.data:
-            speed = self.coordinator.data.get(self.fan_type, {}).get("speed")
+            original_speed = self.coordinator.data.get(self.fan_type, {}).get("speed")
+            speed = original_speed * (100 // self.coordinator.max_speed) 
+            _LOGGER.debug(f"Calculated speed for {self.name} ({self.fan_type}): {speed}")
+            if speed > 100:
+                return 100
             if speed is not None:
-                return int(speed * 10)
+                return speed
         return None
 
     async def async_turn_on(self, percentage: int | None = None, preset_mode: str | None = None, **kwargs: Any) -> None:
@@ -151,6 +165,8 @@ class PranaFan(FanEntity):
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
         _LOGGER.debug(f"Setting {self.name} ({self.fan_type}) speed to {percentage}%")
+
+
         send_speed_percentage = PranaSendSpeed(self.fan_type, self.coordinator)
         await send_speed_percentage.send_speed_percentage(percentage)
         await self.coordinator.async_refresh()
@@ -161,7 +177,7 @@ class PranaFan(FanEntity):
 
     @property
     def available(self) -> bool:
-
+        return True
         if self.fan_type == PranaFanType.BOUNDED:
             return self.coordinator.data.get("bound")
         else:
@@ -179,5 +195,5 @@ async def async_setup_entry(
     async_add_entities([
     PranaFan(unique_id=f"{entry.entry_id}-extractfan", name="Extract Speed", coordinator=coordinator, fan_type=PranaFanType.EXTRACT, entry=entry),
     PranaFan(unique_id=f"{entry.entry_id}-supplyfan", name="Supply Speed", coordinator=coordinator, fan_type=PranaFanType.SUPPLY, entry=entry),
-    PranaFan(unique_id=f"{entry.entry_id}-boundedfan", name="Bounded Speed", coordinator=coordinator, fan_type=PranaFanType.BOUNDED, entry=entry),
+    # PranaFan(unique_id=f"{entry.entry_id}-boundedfan", name="Bounded Speed", coordinator=coordinator, fan_type=PranaFanType.BOUNDED, entry=entry),
 ])

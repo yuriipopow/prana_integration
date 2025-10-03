@@ -5,6 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from .const import DOMAIN, PranaFanType, PranaSwitchType, PranaSensorType
 from aiohttp import ClientSession
+from .tools import Tools
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class PranaCoordinator(DataUpdateCoordinator):
             # TODO: Replace with real fetch logic
             # Example: return await self.client.get_all_states()
                 max_speed = 5  # Replace with dynamic value if needed
-                state = self.hex_string_to_int_list(await self.async_get_state())
+                state = Tools.hex_string_to_int_list(await self.async_get_state())
 
                 parsed_state ={
                     PranaFanType.EXTRACT: {"speed": state[25] // 10 if state[23] == 1 else 0, "is_on": state[23] == 1 , "max_speed": self.max_speed},
@@ -64,7 +65,7 @@ class PranaCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error updating Prana device: {err}")
 
     def parseConfig(self, config: str) -> None:
-        config_list_int = self.hex_string_to_int_list(config)
+        config_list_int = Tools.hex_string_to_int_list(config)
         self.max_speed = config_list_int[61] // 10
 
     async def async_get_state(self):
@@ -77,12 +78,7 @@ class PranaCoordinator(DataUpdateCoordinator):
                     raise Exception(f"Error {resp.status}")
     
         
-    def hex_string_to_int_list(self, hex_str: str) -> list[int]:
-        # Remove spaces and make sure it's uppercase (optional)
-        hex_str = hex_str.replace(" ", "").strip()
-        
-        # Split every 2 characters and convert to int
-        return [int(hex_str[i:i+2], 16) for i in range(0, len(hex_str), 2)]
+    
     
     def parse_sensor_value(self, high_byte: int, low_byte: int, is_16bit: bool):
         """Parse sensor value from high/low bytes."""
